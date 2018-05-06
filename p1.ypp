@@ -1,0 +1,29 @@
+%{
+#include <stdio.h>
+#include <strings.h>
+#include <stdlib.h>
+
+extern int line_no;
+extern void yyset_in(FILE*);
+//-- Lexer prototype required by bison, aka getNextToken()
+int yylex(); 
+int yyerror(const char *p) {
+    printf("error at %d line: %s\n",line_no,p);
+    return 1;
+}
+%}
+
+//-- SYMBOL SEMANTIC VALUES -----------------------------
+%union {
+  int val; 
+  char sym;
+};
+
+%start program
+//-- GRAMMAR RULES ---------------------------------------
+%%
+
+program: ;
+
+%%
+//-- FUNCTION DEFINITIONS ---------------------------------
