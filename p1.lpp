@@ -1,0 +1,355 @@
+%{
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+#include <ctype.h>
+#include <limits.h>
+#include <sys/types.h>
+
+#include <QMessageBox>
+#include <QStack>
+#include <QDebug>
+
+#include "calcparser_global.h"
+
+#define YYDEBUG 1
+
+#include "p1.tab.hh"
+
+struct calc_struct {
+    QChar op;
+    float val;
+};
+
+struct calc_struct *  calcStruct;
+QStack<calc_struct *> calc_stack;
+
+enum {
+    T_NUMBER = 4,
+    T_EQUAL = 5,
+};
+
+/**
+ * Forward declerations
+ **/
+void Number ();
+void HexaNumber ();
+
+void add_op2stack(QChar op);
+void add_num2stack(double val);
+
+void get_stackResult(void);
+
+extern int yyerror(const char*);
+int line_no = 1;
+%}
+
+%option noyywrap
+%option caseless
+
+DIGIT       [0-9]
+HEXALETTER  [a-fA-F]
+HEXANUMBER  [0][x](({DIGIT}|{HEXALETTER})+)
+NUM         {DIGIT}+
+WS          [ \t\n\r]*
+
+%x COMMENTS NUM
+%x OPADD OPSUB OPDIV OPMOD
+%x CREATE_CMD CREATE_FILE CREATE_TABLE
+%x NEW_TABLE_STRUCT
+%x TABLE_STRUCT_BEG
+%x TABLE_STRUCT_END DATA_TYPE PRIMARY_KEY
+%x DATA_LENBEG
+%x DATA_LENEND PRIKEYS_BEG PRIKEYS_END
+%x FILENAME
+%x IF_CMD IF_CMD_END IFCONDS IF_COND_END
+%x IF_BODY_BEG IF_ELSE_BODY_BEG
+%x PARAMETER_CMD LOCAL_CMD CLASS_CMD CLASS_BODY
+%x NUM_T2 NUM_OPERS
+%%
+
+\/\/.*            { BEGIN(INITIAL); }
+\/\/.*\n          { ++line_no; BEGIN(INITIAL); }
+
+\&\&.*            { BEGIN(INITIAL); }
+\*\*.*            { BEGIN(INITIAL); }
+
+\&\&-*\n          { ++line_no; BEGIN(INITIAL); }
+\*\*.*\n          { ++line_no; BEGIN(INITIAL); }
+
+\/\*              { BEGIN(COMMENTS); }
+<COMMENTS>\*\/    { BEGIN(INITIAL); }
+<COMMENTS>\n      { ++line_no; }
+<COMMENTS>.       ;
+
+"if"                { printf("condition\n");     BEGIN(IF_CMD);        }
+class               { printf("class beg\n");     BEGIN(CLASS_CMD);     }
+create              { printf("cmd: create\n");   BEGIN(CREATE_CMD);    }
+parameter           { printf("ein parameter\n"); BEGIN(PARAMETER_CMD); }
+local               { printf("ein local\n");     BEGIN(LOCAL_CMD);     }
+
+"^(.*/)?(?:$|(.+?)(?:(\.[^.]*$)|$))?"  { return FILENAME; }
+
+[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"="[ \t\n\r]*"new"[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*[ \t\n\r]*"("[ \t\n\r]*")" {
+printf("lokslers\n");
+}
+
+<IF_CMD>[ \t\n\r]*"("[ \t\n\r]*     { BEGIN(IFCONDS); }
+<IFCONDS>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*")"[ \t\n\r]*    {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("clasna1: -> %s\n",txt);
+    free(txt);
+    BEGIN(IF_BODY_BEG);
+}
+<IF_BODY_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\.[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"="[ \t\n\r]*\.[ \t\n\r]*("F"|"T")[ \t\n\r]*\. {
+    printf("varsi function hc\n");
+    BEGIN(IF_BODY_BEG);
+}
+<IF_BODY_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\.[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"("[ \t\n\r]*")" {
+    printf("caller function hc\n");
+    BEGIN(IF_BODY_BEG);
+}
+<IF_BODY_BEG>else|endif         { BEGIN(INITIAL); }
+
+<IF_CMD_END>else                { printf("an elser\n"); BEGIN(IF_ELSE_BODY_BEG);}
+<IF_ELSE_BODY_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\.[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"="\.[ \t\n\r]*"f"\. {
+    printf("body else is false\n");
+}
+<IF_ELSE_BODY_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\.[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"="\.[ \t\n\r]*"t"\. {
+    printf("body else is true\n");
+}
+<IF_ELSE_BODY_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\.[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"("[ \t\n\r]*")" {
+    printf("function else hc\n");
+}
+
+<IF_CMD_END>endif               { printf("if ends\n"); BEGIN(INITIAL); }
+
+<CLASS_CMD>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*"of"[ \t\n\r]*[a-zA-Z_]+[a-zA-Z0-9_]*    {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("clasna1: -> %s\n",txt);
+    free(txt);
+    BEGIN(CLASS_BODY);
+}
+<CLASS_BODY>endclass        { printf("class end\n"); BEGIN(INITIAL); }
+
+<LOCAL_CMD>[a-zA-Z_]+[a-zA-Z0-9_]*    {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("loca2: -> %s\n",txt);
+    free(txt);
+    BEGIN(INITIAL);
+}
+<LOCAL_CMD>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\,[ \t\n\r]*  {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("loca1: -> %s\n",txt);
+    free(txt);
+    BEGIN(LOCAL_CMD);
+}
+
+<PARAMETER_CMD>[a-zA-Z_]+[a-zA-Z0-9_]*    {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("para2: -> %s\n",txt);
+    free(txt);
+    BEGIN(INITIAL);
+}
+<PARAMETER_CMD>[a-zA-Z_]+[a-zA-Z0-9_]*[ \t\n\r]*\,[ \t\n\r]*  {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("para1: -> %s\n",txt);
+    free(txt);
+    BEGIN(PARAMETER_CMD);
+}
+
+
+<CREATE_CMD>"file"      { printf("new: file  \n"); BEGIN(CREATE_FILE); }
+<CREATE_CMD>"table"     { printf("new: table \n"); BEGIN(CREATE_TABLE);  }
+
+<CREATE_FILE><FILENAME> {
+printf("wwwmos\n");
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("filserl1: -> %s\n",txt);
+    free(txt);
+    BEGIN(INITIAL);
+}
+<CREATE_FILE>[a-zA-Z_]+[a-zA-Z0-9_\.]* {
+printf("ccmos\n");
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("filserl2: -> %s\n",txt);
+    free(txt);
+    BEGIN(INITIAL);
+}
+
+<CREATE_TABLE><FILENAME> {
+printf("fos\n");
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("tabsel1: -> %s\n",txt);
+    free(txt);
+    BEGIN(NEW_TABLE_STRUCT);
+}
+<CREATE_TABLE>[a-zA-Z_]+[a-zA-Z0-9_\.]* {
+printf("mos\n");
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("tabsel2: -> %s\n",txt);
+    free(txt);
+    BEGIN(NEW_TABLE_STRUCT);
+}
+
+<NEW_TABLE_STRUCT>"(" {
+    printf("beg\n");
+    BEGIN(TABLE_STRUCT_BEG);
+}
+
+<TABLE_STRUCT_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*  {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    if (strcmp(txt,"primary") == 0) {
+        printf("a key\n");
+        BEGIN(PRIMARY_KEY);
+    }
+    else {
+        printf("ident: %s\n",yytext);
+        BEGIN(DATA_TYPE);
+    }
+}
+<TABLE_STRUCT_END>")"             { printf("table struct ok.\n"); BEGIN(INITIAL); }
+
+<PRIMARY_KEY>"("   {
+    printf(" a key is given...\n");
+    BEGIN(PRIKEYS_BEG);
+}
+<PRIKEYS_BEG>[a-zA-Z_]+[a-zA-Z0-9_]* {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("1prikey: %s\n",txt);
+    free(txt);
+    BEGIN(PRIKEYS_END);
+}
+<PRIKEYS_BEG>[a-zA-Z_]+[a-zA-Z0-9_]*\,[ \t]* {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("2prikey: %s\n",txt);
+    free(txt);
+    BEGIN(PRIKEYS_BEG);
+}
+<PRIKEYS_END>")"    {
+    printf("tabselle has prikeys.\n");
+    BEGIN(INITIAL);
+}
+
+<DATA_TYPE>("b"|"bool"|"boolean") { printf(" B, \n"); BEGIN(TABLE_STRUCT_END); }
+<DATA_TYPE>("l"|"logical")        { printf(" L, \n"); BEGIN(TABLE_STRUCT_END); }
+<DATA_TYPE>("n"|"numeric")        { printf(" N, \n"); BEGIN(DATA_LENBEG); }
+<DATA_TYPE>("c"|"char")           { printf(" C, \n"); BEGIN(DATA_LENBEG); }
+<DATA_TYPE>("d"|"date")           { printf(" D, \n"); BEGIN(TABLE_STRUCT_END); }
+
+<DATA_LENBEG>"("[0-9]+")"   {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("1>numser: %s\n",txt);
+    free(txt);
+    BEGIN(TABLE_STRUCT_END);
+}
+<DATA_LENBEG>"("[0-9]+")"[ \t]*\,   {
+    char *txt = (char*) malloc(strlen(yytext)+1);
+    strcpy(txt,yytext);
+    printf("2>numser: %s\n",txt);
+    free(txt);
+    printf("nax\n");
+    BEGIN(TABLE_STRUCT_BEG);
+}
+
+{NUM}{WS}          {
+    add_num2stack(atoi(yytext));
+    qDebug() << "num A: " << atoi(yytext); BEGIN(NUM_OPERS);
+}
+<NUM_OPERS>"+"     { add_op2stack('+'); qDebug() << "add"; BEGIN(NUM_T2); }
+<NUM_OPERS>"-"     { add_op2stack('-'); qDebug() << "sub"; BEGIN(NUM_T2); }
+<NUM_OPERS>"*"     { qDebug() << "mul"; BEGIN(NUM_T2); }
+<NUM_OPERS>"/"     { add_op2stack('/'); qDebug() << "div"; BEGIN(NUM_T2); }
+
+<NUM_T2>{WS}{NUM}  {
+    qDebug() << "num B: " << atoi(yytext);
+    add_num2stack(atoi(yytext));
+    add_op2stack('*');
+    BEGIN(NUM_OPERS);
+
+    BEGIN(INITIAL);
+}
+
+HEXANUMBER          { HexaNumber(); return T_NUMBER; }
+
+[ \t]*              { }
+[\n]*               { ++line_no; }
+
+<<EOF>>  { return 0; }
+.                   { printf("syntac error."); return 0; }
+%%
+
+void Number () {
+    yylval.val = atol(yytext);
+}
+
+void HexaNumber () {
+    yylval.val = (unsigned int) strtol(yytext, (char **)NULL, 16);
+}
+
+void add_op2stack(QChar op)
+{
+    calc_struct * cs = new calc_struct;
+    cs->op = op;
+    calc_stack.push(cs);
+}
+
+void add_num2stack(double val)
+{
+    calc_struct *cs = new calc_struct;
+    cs->op = ' ';
+    cs->val = val;
+    calc_stack.push(cs);
+}
+
+void get_stackResult(void)
+{
+    struct calc_struct *cs[4];
+    
+    cs[0] = new calc_struct;
+    cs[1] = new calc_struct;
+    cs[2] = new calc_struct;
+    cs[3] = new calc_struct;
+    
+    float value1 = 0.00;
+    float value2 = 0.00;
+   
+    while (!calc_stack.isEmpty()) {
+        cs[1] = calc_stack.pop();
+        if (cs[1]->op == QChar('*')) {
+            cs[1] = calc_stack.pop();
+            cs[2] = calc_stack.pop();
+            
+            qDebug() << "2--> " << cs[1]->val << " op: " << cs[2]->op;
+            qDebug() << "3--> " << cs[2]->val << " op: " << cs[2]->op;
+            
+            value2 = cs[1]->val * cs[2]->val;
+            qDebug() << "1value: " << value2;
+        }   else
+        if (cs[1]->op == '+') {
+            cs[1] = calc_stack.pop();
+            cs[2] = calc_stack.pop();
+            
+            qDebug() << "+2--> " << cs[1]->val << " op: " << cs[2]->op;
+            qDebug() << "+3--> " << cs[2]->val << " op: " << cs[2]->op;
+            
+            value2 = cs[1]->val + cs[2]->val;
+            qDebug() << "2value: " << value2;
+        }
+    }
+    qDebug() << value2;
+}
