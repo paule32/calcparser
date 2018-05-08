@@ -11,6 +11,7 @@
 #include <QDebug>
 
 #include "calcparser_global.h"
+#include "solverclass.h"
 
 #define YYDEBUG 1
 
@@ -18,7 +19,7 @@
 
 struct calc_struct {
     QChar op;
-    float val;
+    QString val;
 };
 
 struct calc_struct *  calcStruct;
@@ -36,22 +37,28 @@ void Number ();
 void HexaNumber ();
 
 void add_op2stack(QChar op);
-void add_num2stack(double val);
+void add_num2stack(QString);
 
 void get_stackResult(void);
 
 extern int yyerror(const char*);
 int line_no = 1;
+
+QChar opstr;
+QString tmp_val;
 %}
 
 %option noyywrap
 %option caseless
 
-DIGIT       [0-9]
+DIGIT       [0-9\.]
 HEXALETTER  [a-fA-F]
 HEXANUMBER  [0][x](({DIGIT}|{HEXALETTER})+)
 NUM         {DIGIT}+
 WS          [ \t\n\r]*
+REMS1       ((\/\/.*)|(\&\&.*)|(\/\/.*\n*)|(\&\&.*\n*))*
+REMS2       ((\/\*\*\/)|(\/\*(\n*|.*)\*\/))*
+REMSER      {WS}{REMS1}|{REMS2}{WS}
 
 %x COMMENTS NUM
 %x OPADD OPSUB OPDIV OPMOD
@@ -65,7 +72,7 @@ WS          [ \t\n\r]*
 %x IF_CMD IF_CMD_END IFCONDS IF_COND_END
 %x IF_BODY_BEG IF_ELSE_BODY_BEG
 %x PARAMETER_CMD LOCAL_CMD CLASS_CMD CLASS_BODY
-%x NUM_T2 NUM_OPERS
+%x NUM_T2 NUM_OPERS NUM_OPERS_COMMS1 NUM_OPERS_COMMS2
 %%
 
 \/\/.*            { BEGIN(INITIAL); }
@@ -266,31 +273,28 @@ printf("mos\n");
     BEGIN(TABLE_STRUCT_BEG);
 }
 
-{NUM}{WS}          {
-    add_num2stack(atoi(yytext));
-    qDebug() << "num A: " << atoi(yytext); BEGIN(NUM_OPERS);
-}
-<NUM_OPERS>"+"     { add_op2stack('+'); qDebug() << "add"; BEGIN(NUM_T2); }
-<NUM_OPERS>"-"     { add_op2stack('-'); qDebug() << "sub"; BEGIN(NUM_T2); }
-<NUM_OPERS>"*"     { qDebug() << "mul"; BEGIN(NUM_T2); }
-<NUM_OPERS>"/"     { add_op2stack('/'); qDebug() << "div"; BEGIN(NUM_T2); }
-
-<NUM_T2>{WS}{NUM}  {
-    qDebug() << "num B: " << atoi(yytext);
-    add_num2stack(atoi(yytext));
-    add_op2stack('*');
-    BEGIN(NUM_OPERS);
-
+{NUM} {
+    add_num2stack(yytext);
+    add_op2stack(opstr);
     BEGIN(INITIAL);
 }
 
+<NUM_OPERS_COMMS1>{REMSER}  { BEGIN(NUM_OPERS); BEGIN(NUM_OPERS_COMMS2); }
+<NUM_OPERS_COMMS2>{REMSER}  { }
+
+
 HEXANUMBER          { HexaNumber(); return T_NUMBER; }
+
+[-+*/] {
+    opstr = yytext[0];
+    qDebug() << "op: " << yytext;
+}
 
 [ \t]*              { }
 [\n]*               { ++line_no; }
 
-<<EOF>>  { return 0; }
-.                   { printf("syntac error."); return 0; }
+<<EOF>>             { return 0; }
+.                   ;
 %%
 
 void Number () {
@@ -305,51 +309,96 @@ void add_op2stack(QChar op)
 {
     calc_struct * cs = new calc_struct;
     cs->op = op;
+    cs->val = "0";
     calc_stack.push(cs);
 }
 
-void add_num2stack(double val)
+void add_num2stack(QString val)
 {
     calc_struct *cs = new calc_struct;
-    cs->op = ' ';
+    cs->op = '#';
     cs->val = val;
     calc_stack.push(cs);
 }
 
 void get_stackResult(void)
 {
-    struct calc_struct *cs[4];
+    struct calc_struct *cs[5];
     
     cs[0] = new calc_struct;
     cs[1] = new calc_struct;
     cs[2] = new calc_struct;
     cs[3] = new calc_struct;
+    cs[4] = new calc_struct;
     
-    float value1 = 0.00;
-    float value2 = 0.00;
-   
+    int co = 0;
     while (!calc_stack.isEmpty()) {
-        cs[1] = calc_stack.pop();
-        if (cs[1]->op == QChar('*')) {
+        cs[0] = calc_stack.pop();
+        
+        if (cs[0]->op == QChar('*'))
+        {
             cs[1] = calc_stack.pop();
             cs[2] = calc_stack.pop();
-            
-            qDebug() << "2--> " << cs[1]->val << " op: " << cs[2]->op;
-            qDebug() << "3--> " << cs[2]->val << " op: " << cs[2]->op;
-            
-            value2 = cs[1]->val * cs[2]->val;
-            qDebug() << "1value: " << value2;
-        }   else
-        if (cs[1]->op == '+') {
+            qDebug() << "moler L: "
+            << cs[1]->val << " R: "
+            << cs[2]->val ;
+        }
+        else if (cs[0]->op == QChar('+')) {
             cs[1] = calc_stack.pop();
-            cs[2] = calc_stack.pop();
+            qDebug() << "plusr L: "
+            << cs[1]->val;
             
-            qDebug() << "+2--> " << cs[1]->val << " op: " << cs[2]->op;
-            qDebug() << "+3--> " << cs[2]->val << " op: " << cs[2]->op;
+            if (co == 0) {
+                cs[3]->val = cs[1]->val;
+                cs[3]->op  = '+';
+                ++co;
+            }
+            else if (co == 1) {
+                cs[4]->val = cs[1]->val;
+                cs[4]->op  = '+';
+                
+                qDebug() << "1A: " << " f: " << cs[3]->op << " num: " << cs[3]->val;
+                qDebug() << "1B: " << " f: " << cs[4]->op << " num: " << cs[4]->val;
+                
+                co = 0;
+                
+                // get into calc...
+                SolverClass solver(
+                cs[3]->val, cs[3]->op,
+                cs[4]->val, cs[4]->op, 255,
+                //
+                solver_enum::solve_add);
+            }
+        }
+        else if (cs[0]->op == QChar('-')) {
+            cs[1] = calc_stack.pop();
+            qDebug() << "minur L: "
+            << cs[1]->val;
             
-            value2 = cs[1]->val + cs[2]->val;
-            qDebug() << "2value: " << value2;
+            if (co == 0) {
+                cs[3]->val = cs[1]->val;
+                cs[3]->op  = '-';
+                ++co;
+            }
+            else if (co == 1) {
+                cs[4]->val = cs[1]->val;
+                cs[4]->op  = '-';
+                
+                qDebug() << "2A: " << " f: " << cs[3]->op << " num: " << cs[3]->val;
+                qDebug() << "2B: " << " f: " << cs[4]->op << " num: " << cs[4]->val;
+                co = 0;
+                
+                // get into calc...
+                
+                /*SolverClass solver(
+                    cs[3]->val
+                    cs[4]->val,'-')*/
+            }
+        }
+        else if (cs[0]->op == QChar('/')) {
+            cs[1] = calc_stack.pop();
+            qDebug() << "divsr L: "
+            << cs[1]->val;
         }
     }
-    qDebug() << value2;
 }

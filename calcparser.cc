@@ -4,16 +4,24 @@
 #include <sys/types.h>
 #include <limits.h>
 
+#include <QChar>
 #include <QMessageBox>
 #include "calcparser.h"
 
 extern void yyset_in(FILE*);
 extern int yyparse();
+extern void get_stackResult(void);
+
+extern QChar opstr;
 
 CalcParser::CalcParser()
 {
 }
 
+void setup_vars()
+{
+    opstr = '+';
+}
 void start_calculation(void)
 {
     FILE *f = fopen("source.calc","r");
@@ -26,7 +34,10 @@ void start_calculation(void)
     }
     
     yyset_in(f);
+    
+    setup_vars();
     yyparse();
     
     fclose(f);
+    get_stackResult();
 }

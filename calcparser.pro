@@ -10,11 +10,13 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
         calcparser.cc \
         p1.cc \
-        p1.tab.cc
+        p1.tab.cc \
+    solverclass.cc
 
 HEADERS += \
         calcparser.h \
-        calcparser_global.h
+        calcparser_global.h \
+    solverclass.h
 
 #unix {
 #    target.path = /usr/lib
